@@ -9,21 +9,34 @@
 #define IMG_COUNT 6
 #define ALPHA 1.0
 
-
 using namespace std;
 using namespace cv;
 
+void generatePlyFile(Mat &depth,int imageWidth,int imageHeight)
+{
+    ofstream ofs("bunny_surface_XYavg.ply", ofstream::out);
+    ofs << "ply\nformat ascii 1.0\ncomment alpha="<< ALPHA <<"\nelement vertex 14400\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue z\nend_header" << endl;
+    
+    for(int i = 0 ; i < imageHeight ; i ++)
+    {
+        for(int j = 0 ; j < imageWidth ; j ++)
+        {
+            ofs << i << " " << j << " " << depth.at<double>(i,j) << " " << "255 255 255" << endl;
+        }
+    }
+}
+
 void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHeight)
 {
-    Mat depthXFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
-    Mat depthYFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
-    Mat depthTemp(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
-    
+    Mat depthXFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積X再積Y .
+    Mat depthX2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
+    Mat depthYFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積Y再積X .
+    Mat depthY2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
     
     // 先求出depth的 col 1
     for(int i = 1 ; i < imageHeight ; i ++)
     {
-        depthYFirst.at<double>(i,0) = depthYFirst.at<double>(i-1,0) + dfOfdy.at<double>(i-1,0);
+        depthYFirst.at<double>(i,0) =  depthYFirst.at<double>(i-1,0) + dfOfdy.at<double>(i-1,0);
     }
     
     // 由左積向右
@@ -32,16 +45,33 @@ void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHe
         for(int j = 1 ; j < imageWidth ; j ++)
         {
             depthYFirst.at<double>(i,j) = depthYFirst.at<double>(i,j-1) + dfOfdx.at<double>(i,j-1);
+
         }
     }
     
+    // 先求出depth的 col imageWidth-1
+    for(int i = 1 ; i < imageHeight ; i ++)
+    {
+        depthY2First.at<double>(i,imageWidth-1) =  depthY2First.at<double>(i-1,imageWidth-1) + dfOfdy.at<double>(i-1,imageWidth-1);
+    }
+    
+    // 由右積向左
+    for(int i = 0 ; i < imageHeight ; i ++)
+    {
+        for(int j = imageWidth - 2 ; j > -1 ; j --)
+        {
+            depthY2First.at<double>(i,j) = depthY2First.at<double>(i,j+1) - dfOfdx.at<double>(i,j+1);
+            
+        }
+    }
+
     // 先求出depth的 row 1
     for(int i = 1 ; i < imageWidth ; i ++)
     {
-        depthXFirst.at<double>(0,i) = depthXFirst.at<double>(0,i-1) + dfOfdx.at<double>(0,i-1);
+        depthXFirst.at<double>(0,i) =  depthXFirst.at<double>(0,i-1) + dfOfdx.at<double>(0,i-1);
     }
     
-    // 由上積向下
+    // 由上積向下 .
     for(int i = 0 ; i < imageWidth ; i ++)
     {
         for(int j = 1 ; j < imageHeight ; j ++)
@@ -50,35 +80,69 @@ void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHe
         }
     }
     
+    // 先求出depth的 row 1
+    for(int i = 1 ; i < imageWidth ; i ++)
+    {
+        depthX2First.at<double>(imageHeight-1,i) =  depthX2First.at<double>(imageHeight-1,i-1) + dfOfdx.at<double>(imageHeight-1,i-1);
+    }
     
-    // 前面兩個結果平均
+    // 由下積向上 .
+    for(int i = 0 ; i < imageWidth ; i ++)
+    {
+        for(int j = imageHeight - 2 ; j > -1 ; j --)
+        {
+            depthX2First.at<double>(j,i) = depthX2First.at<double>(j+1,i) - dfOfdy.at<double>(j+1,i);
+        }
+    }
+
+    
+    
+    Mat depthTemp(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
+    
+    // 前面兩個結果依比例混和 .
     for(int i = 0 ; i < imageHeight ; i ++)
     {
         for(int j = 0 ; j < imageWidth ; j ++)
         {
-            depthTemp.at<double>(i,j) = 0 * depthXFirst.at<double>(i,j) + 1 * depthYFirst.at<double>(i,j);
+            
+            double ratioX = (double)j/(double)imageWidth;
+            double ratioY = (double)i/(double)imageHeight;
+            
+            depthTemp.at<double>(i,j) = ratioX * depthY2First.at<double>(i,j) + (1-ratioX) * depthYFirst.at<double>(i,j);
+             
+            
+            //depthTemp.at<double>(i,j) = depthXFirst.at<double>(i,j);
+            
+            //depthTemp.at<double>(i,j) = ratioY * depthX2First.at<double>(i,j) + (1-ratioY) * depthXFirst.at<double>(i,j);
+            
+            
+            //depthTemp.at<double>(i,j) = ratioX * depthY2First.at<double>(i,j) + (1-ratioX) * depthYFirst.at<double>(i,j) + ratioY * depthX2First.at<double>(i,j) + (1-ratioY) *  depthXFirst.at<double>(i,j);
+            
         }
     }
     
-    // 使用blur filter 
+    // 使用blur filter : 附近九宮格值平均為該點的值 .
     for(int i = 1 ; i < imageHeight-1 ; i++)
     {
         for(int j = 1 ; j < imageWidth-1 ; j++)
         {
+            
             double temp = 0;
+            
             for(int k = i-1 ; k < i+2 ; k++)
             {
                 for(int s = j-1 ; s < j+2 ; s++)
                 {
                     temp += depthTemp.at<double>(k,s);
+                    if(k == 1 && s == j)
+                        temp += depthTemp.at<double>(k,s);
+                    
                 }
             }
-            depth.at<double>(i,j) = temp/9.0;
-        }
+             
+            depth.at<double>(i,j) = temp/10.0;
+         }
     }
-    
-
-    
 }
 
 void generateDelta(Mat &dfOfdx,Mat &dfOfdy,Mat &normals,int imageWidth,int imageHeight)
@@ -93,9 +157,9 @@ void generateDelta(Mat &dfOfdx,Mat &dfOfdy,Mat &normals,int imageWidth,int image
             nb = (normals.col(i * imageWidth + j)).at<double>(1,0);
             nc = (normals.col(i * imageWidth + j)).at<double>(2,0);
             
-            cout << na << " " << nb << " " << nc << endl;
-            dfOfdx.at<double>(i,j) = (nc == 0)? 0:-1*na/nc;
-            dfOfdy.at<double>(i,j) = (nc == 0)? 0:-1*nb/nc;
+            //cout << na << " " << nb << " " << nc << endl;
+            dfOfdx.at<double>(i,j) = (nc == 0)? -1.0*na:(-1.0)*na/nc;
+            dfOfdy.at<double>(i,j) = (nc == 0)? -1.0*nb:(-1.0)*nb/nc;
         }
     }
 }
@@ -109,8 +173,6 @@ void normalizeNormals(Mat &normals,int pixelAmout)
         na = normals.col(i).at<double>(0,0);
         nb = normals.col(i).at<double>(1,0);
         nc = normals.col(i).at<double>(2,0);
-        
-        //cout << na << " " << nb << " " << nc << endl;
         
         length = sqrt(pow(na,2) + pow(nb,2) + pow(nc,2));
         normals.col(i).at<double>(0,0) = (length == 0)? 0.0:na/length;
@@ -127,7 +189,8 @@ void calculateNormals(Mat &normals,Mat &Y,Mat &U,int pixelAmount)
     
     for(int i = 0 ; i < pixelAmount ; i ++)
     {
-        normals.col(i) = pseudoInverseOfU * Y.col(i);
+         //normals.col(i) =  (U.t() * U).inv(CV_SVD) * U.t() * Y.col(i);
+         normals.col(i) = pseudoInverseOfU * Y.col(i);
     }
 }
 
@@ -151,17 +214,13 @@ int loadLightSource(Mat &LightSources)
     int index;
     double x,y,z;
     
-    
     while(getline(lightSource, line))
     {
         if(sscanf(line.c_str(),"pic%d: (%lf,%lf,%lf)",&index,&x,&y,&z) != 4)
             return -1;
         
-        cout << index << " " << x << " " << y << " " << z << endl;
-        
         LightSourceArray[index-1] = (Mat_<double>(1,3) << x , y , z);
     }
-    
     
     /* Combine to  6 * 3 Matrix (U Matrix) */
     for(int i =0; i < IMG_COUNT; i++)
@@ -192,10 +251,16 @@ int main(int argc, const char * argv[])
     Mat LightSources(Mat::zeros(IMG_COUNT ,3, CV_64FC(1)));
     
     if(loadImage(Images) == -1)
-        cout << "Load image failure !" << endl;
+    {
+        cerr << "Load image failure !" << endl;
+        exit(1);
+    }
     
     if(loadLightSource(LightSources) == -1)
-        cout << "Load ligt sources failure !" << endl;
+    {
+        cerr << "Load ligt sources failure !" << endl;
+        exit(1);
+    }
     
     /*  Target : x = (U^TU)^-1 * U^T * y for all pixels
      *  U (IMG# * 3): Light source Matrix .
@@ -212,55 +277,16 @@ int main(int argc, const char * argv[])
     calculateNormals(normals, allImagesIntensity, LightSources, pixelAmount);
     normalizeNormals(normals,pixelAmount);
     
-    /* Generate df/dx , df/dy */
     Mat dfOfdx(Mat::zeros(imageHeight,imageWidth, CV_64FC(1)));
     Mat dfOfdy(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
     generateDelta(dfOfdx, dfOfdy, normals, imageWidth, imageHeight);
     
-    /* Generate Depth */
     Mat depth(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
     generateDepth(depth, dfOfdx, dfOfdy, imageWidth, imageHeight);
 
-    ofstream ofs("bunny_surface_XYavg.ply", ofstream::out);
-    ofs << "ply\nformat ascii 1.0\ncomment alpha="<< ALPHA <<"\nelement vertex 14400\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue z\nend_header" << endl;
-    for(int i = 0 ; i < imageHeight ; i ++)
-    {
-        for(int j = 0 ; j < imageWidth ; j ++)
-        {
-            ofs << i << " " << j << " " << depth.at<double>(i,j) << " " << "255 255 255" << endl;
-        }
-    }
+    generatePlyFile(depth, imageWidth, imageHeight);
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    /*
-    Mat Image = imread("test/bunny/pic1.bmp", IMREAD_GRAYSCALE);
-    
-    Mat tempImage = Image.clone();
-    Mat smallImage(Image.rows / 2, Image.cols / 2, CV_8U);
-    
-    for (int rowIndex = 0; rowIndex < smallImage.rows; rowIndex++) {
-        for (int colIndex = 0; colIndex < smallImage.cols; colIndex++) {
-            smallImage.at<uchar>(rowIndex, colIndex) = tempImage.at<uchar>(rowIndex * 2, colIndex * 2);
-        }
-    }
-    
-    Mat result(tempImage.rows + smallImage.rows, tempImage.cols, CV_8U, Scalar(0));
-    tempImage.copyTo(result(Rect(0, 0, tempImage.cols, tempImage.rows)));
-    smallImage.copyTo(result(Rect(0, tempImage.rows, smallImage.cols, smallImage.rows)));
-    
-    */
-    
-    //imshow("CV_window", Images[5]);   /* Params : Windows name / Mat */
-    
-    waitKey();
+    return 0;
     
 }
 
