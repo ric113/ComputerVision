@@ -5,6 +5,8 @@
 #include <fstream>
 #include <stdio.h>
 #include <math.h>
+#include <vector>
+#include <algorithm>
 
 #define IMG_COUNT 6
 #define ALPHA 1.0
@@ -14,8 +16,8 @@ using namespace cv;
 
 void generatePlyFile(Mat &depth,int imageWidth,int imageHeight)
 {
-    ofstream ofs("bunny_surface_XYavg.ply", ofstream::out);
-    ofs << "ply\nformat ascii 1.0\ncomment alpha="<< ALPHA <<"\nelement vertex 14400\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue z\nend_header" << endl;
+    ofstream ofs("bunny_.ply", ofstream::out);
+    ofs << "ply\nformat ascii 1.0\ncomment alpha="<< ALPHA <<"\nelement vertex "<< imageHeight * imageWidth<<"\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue z\nend_header" << endl;
     
     for(int i = 0 ; i < imageHeight ; i ++)
     {
@@ -25,13 +27,57 @@ void generatePlyFile(Mat &depth,int imageWidth,int imageHeight)
         }
     }
 }
+void considerXY(Mat &X,Mat &X2,Mat &Y,Mat &Y2, Mat &depthTemp,int imageWidth,int imageHeight)
+{
+    for(int i = 0 ; i < imageHeight ; i ++)
+    {
+        for(int j = 0 ; j < imageWidth ; j ++)
+        {
+            double ratioY = (double)i/(double)imageHeight/2.0;
+            double ratioX = (double)j/(double)imageWidth/2.0;
+            
+            depthTemp.at<double>(i,j) = ratioX * Y2.at<double>(i,j) + (0.5-ratioX) * Y.at<double>(i,j) + ratioY * X2.at<double>(i,j) + (0.5-ratioY) *  X.at<double>(i,j);
+
+        }
+    }
+
+}
+
+void considerY(Mat &Y,Mat &Y2, Mat &depthTemp,int imageWidth,int imageHeight)
+{
+    for(int i = 0 ; i < imageHeight ; i ++)
+    {
+        for(int j = 0 ; j < imageWidth ; j ++)
+        {
+            
+            double ratioX = (double)j/(double)imageWidth;
+            depthTemp.at<double>(i,j) = ratioX * Y2.at<double>(i,j) + (1-ratioX) * Y.at<double>(i,j);
+        }
+    }
+}
+
+void considerX(Mat &X,Mat &X2, Mat &depthTemp,int imageWidth,int imageHeight)
+{
+    for(int i = 0 ; i < imageHeight ; i ++)
+    {
+        for(int j = 0 ; j < imageWidth ; j ++)
+        {
+            double ratioY = (double)i/(double)imageHeight;
+            
+            
+            depthTemp.at<double>(i,j) = ratioY * X2.at<double>(i,j) + (1-ratioY) * X.at<double>(i,j);
+            
+            
+        }
+    }
+}
 
 void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHeight)
 {
-    Mat depthXFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積X再積Y .
-    Mat depthX2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
-    Mat depthYFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積Y再積X .
-    Mat depthY2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
+    Mat depthXFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積X再積Y,上到下 .
+    Mat depthX2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));  // 先積X再積Y,下到上 .
+    Mat depthYFirst(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));   // 先積Y再積X,左到右 .
+    Mat depthY2First(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));  // 先積Y再積X,右到左 .
     
     // 先求出depth的 col 1
     for(int i = 1 ; i < imageHeight ; i ++)
@@ -80,7 +126,7 @@ void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHe
         }
     }
     
-    // 先求出depth的 row 1
+    // 先求出depth的 row imageHeight-1
     for(int i = 1 ; i < imageWidth ; i ++)
     {
         depthX2First.at<double>(imageHeight-1,i) =  depthX2First.at<double>(imageHeight-1,i-1) + dfOfdx.at<double>(imageHeight-1,i-1);
@@ -95,31 +141,12 @@ void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHe
         }
     }
 
-    
-    
     Mat depthTemp(Mat::zeros(imageHeight, imageWidth, CV_64FC(1)));
     
-    // 前面兩個結果依比例混和 .
-    for(int i = 0 ; i < imageHeight ; i ++)
-    {
-        for(int j = 0 ; j < imageWidth ; j ++)
-        {
-            
-            double ratioX = (double)j/(double)imageWidth;
-            double ratioY = (double)i/(double)imageHeight;
-            
-            depthTemp.at<double>(i,j) = ratioX * depthY2First.at<double>(i,j) + (1-ratioX) * depthYFirst.at<double>(i,j);
-             
-            
-            //depthTemp.at<double>(i,j) = depthXFirst.at<double>(i,j);
-            
-            //depthTemp.at<double>(i,j) = ratioY * depthX2First.at<double>(i,j) + (1-ratioY) * depthXFirst.at<double>(i,j);
-            
-            
-            //depthTemp.at<double>(i,j) = ratioX * depthY2First.at<double>(i,j) + (1-ratioX) * depthYFirst.at<double>(i,j) + ratioY * depthX2First.at<double>(i,j) + (1-ratioY) *  depthXFirst.at<double>(i,j);
-            
-        }
-    }
+    // 依比例混合 .
+    //considerX(depthXFirst,depthX2First,depthTemp,imageWidth,imageHeight); // 方法一
+    //considerY(depthYFirst,depthY2First,depthTemp,imageWidth,imageHeight); // 方法二
+    considerXY(depthXFirst,depthX2First,depthYFirst,depthY2First, depthTemp,imageWidth,imageHeight); // 方法三
     
     // 使用blur filter : 附近九宮格值平均為該點的值 .
     for(int i = 1 ; i < imageHeight-1 ; i++)
@@ -134,13 +161,12 @@ void generateDepth(Mat &depth,Mat &dfOfdx,Mat &dfOfdy,int imageWidth,int imageHe
                 for(int s = j-1 ; s < j+2 ; s++)
                 {
                     temp += depthTemp.at<double>(k,s);
-                    if(k == 1 && s == j)
-                        temp += depthTemp.at<double>(k,s);
-                    
                 }
             }
              
-            depth.at<double>(i,j) = temp/10.0;
+            depth.at<double>(i,j) = temp/9.0;
+            
+            
          }
     }
 }
@@ -153,13 +179,13 @@ void generateDelta(Mat &dfOfdx,Mat &dfOfdy,Mat &normals,int imageWidth,int image
     {
         for(int j = 0 ; j < imageWidth ; j ++)
         {
-            na = (normals.col(i * imageWidth + j)).at<double>(0,0);
-            nb = (normals.col(i * imageWidth + j)).at<double>(1,0);
-            nc = (normals.col(i * imageWidth + j)).at<double>(2,0);
+            na = (normals.col(i * imageWidth + j)).at<double>(0);
+            nb = (normals.col(i * imageWidth + j)).at<double>(1);
+            nc = (normals.col(i * imageWidth + j)).at<double>(2);
             
-            //cout << na << " " << nb << " " << nc << endl;
-            dfOfdx.at<double>(i,j) = (nc == 0)? -1.0*na:(-1.0)*na/nc;
-            dfOfdy.at<double>(i,j) = (nc == 0)? -1.0*nb:(-1.0)*nb/nc;
+            dfOfdx.at<double>(i,j) = (nc == 0)? (-1.0) * na:(-1.0)*na/nc;
+            //dfOfdy.at<double>(i,j) = (nc == 0)? (-1.0*nb):(-1.0)*nb/nc;  // 方法一、二
+            dfOfdy.at<double>(i,j) = (nc == 0)? (1.0) * nb:(1.0)*nb/nc;  // 方法三
         }
     }
 }
@@ -178,19 +204,15 @@ void normalizeNormals(Mat &normals,int pixelAmout)
         normals.col(i).at<double>(0,0) = (length == 0)? 0.0:na/length;
         normals.col(i).at<double>(1,0) = (length == 0)? 0.0:nb/length;
         normals.col(i).at<double>(2,0) = (length == 0)? 0.0:nc/length;
-        
-        //cout << normals.col(i).at<double>(0,0) << " " << normals.col(i).at<double>(1,0) << " " << normals.col(i).at<double>(2,0) << endl;
     }
 }
 
 void calculateNormals(Mat &normals,Mat &Y,Mat &U,int pixelAmount)
 {
-    Mat pseudoInverseOfU = U.inv(CV_SVD);
     
     for(int i = 0 ; i < pixelAmount ; i ++)
     {
-         //normals.col(i) =  (U.t() * U).inv(CV_SVD) * U.t() * Y.col(i);
-         normals.col(i) = pseudoInverseOfU * Y.col(i);
+        normals.col(i) = (U.t() * U).inv() * U.t() * Y.col(i);
     }
 }
 
@@ -225,11 +247,38 @@ int loadLightSource(Mat &LightSources)
     /* Combine to  6 * 3 Matrix (U Matrix) */
     for(int i =0; i < IMG_COUNT; i++)
     {
-        LightSourceArray[i].row(0).copyTo(LightSources.row(i));
+         LightSourceArray[i].row(0).copyTo(LightSources.row(i));
     }
     
     return 1;
 }
+
+void filtImage(Mat *Images,int imageWidth,int imageHeight)
+{
+    Mat temp;
+    for(int k = 0 ; k < IMG_COUNT ; k ++)
+    {
+        temp = Images[k];
+        for(int i = 0 ; i < imageHeight ; i ++)
+        {
+            for(int j = 0 ; j < imageWidth ; j++)
+            {
+                vector<uchar> tempVec;
+                for(int r = i-1 ; r < i+2 ; r++)
+                {
+                    for(int s = j-1 ; s < j+2 ; s++)
+                    {
+                        tempVec.push_back(temp.at<uchar>(r,s));
+                    }
+                }
+                sort(tempVec.begin(), tempVec.end());
+                Images[k].at<uchar>(i,j) = tempVec.at(4);
+            }
+        }
+    }
+   
+}
+
 
 int loadImage(Mat *Images)
 {
@@ -271,6 +320,7 @@ int main(int argc, const char * argv[])
     int imageWidth = Images[0].cols, imageHeight = Images[0].rows;
     int pixelAmount = imageWidth * imageHeight;
     Mat allImagesIntensity(Mat::zeros(IMG_COUNT, pixelAmount, CV_64FC(1)));
+    filtImage(Images,imageWidth,imageHeight);
     generateY(imageWidth,imageHeight,pixelAmount,allImagesIntensity,Images);
     
     Mat normals(Mat::zeros(3, pixelAmount,CV_64FC(1)));
