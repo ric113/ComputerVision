@@ -230,7 +230,7 @@ void generateY(int imageWidth,int imageHeight,int pixelAmount,Mat &allImagesInte
 
 int loadLightSource(Mat &LightSources)
 {
-    ifstream lightSource("test/bunny/LightSource.txt");
+    ifstream lightSource("test/special/star/LightSource.txt");
     string line ;
     Mat LightSourceArray[IMG_COUNT];
     int index;
@@ -285,7 +285,7 @@ int loadImage(Mat *Images)
     string path ;
     for(int i = 0 ; i < IMG_COUNT ; i ++)
     {
-        path = "test/bunny/pic" + to_string(i+1) + ".bmp";
+        path = "test/special/star/pic" + to_string(i+1) + ".bmp";
         Images[i] = imread(path, IMREAD_GRAYSCALE);
         if(Images[i].data == NULL)
             return -1;
