@@ -20,6 +20,7 @@ void ransacProcess(vector<KeyPoint>*,Mat*,vector<KeyPoint>&,Mat&,vector<Mat_<int
 vector<int> getRandomSeed(int);
 void setUMatrix(Mat&,vector<Point2f>&);
 void calculateModelMatrix(Mat&, Mat&);
+double calculateInlierRatio(Mat&, Mat_<int>&, vector<KeyPoint>&, vector<KeyPoint>&);
 
 
 
@@ -73,6 +74,7 @@ vector<int> getRandomSeed(int range)
         {
             if(seeds[i] == seeds[j])
             {
+                seeds.pop_back();
                 i --;
                 break;
             }
@@ -104,18 +106,20 @@ void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
     Y3 = pointsAndMatchedPoints[6].y;
     Y4 = pointsAndMatchedPoints[7].y;
     
+    // cout << X1 << " " << X2 << " " << X3 << " " << X4 << " " << Y1 << " " << Y2 << " " << Y3 << " " << Y4 << endl;
+    
     float temp[] = {X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
         0, 0, 0, X1, Y1, 1, -1*y1*X1, -1*y1*Y1, -1*y1,
-        X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
-        0, 0, 0, X1, Y1, 1, -1*y1*X1, -1*y1*Y1, -1*y1,
-        X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
-        0, 0, 0, X1, Y1, 1, -1*y1*X1, -1*y1*Y1, -1*y1,
-        X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
-        0, 0, 0, X1, Y1, 1, -1*y1*X1, -1*y1*Y1, -1*y1};
+        X2, Y2, 1,0,0,0,-1*x2*X2,-1*x2*Y2,-1*x2,
+        0, 0, 0, X2, Y2, 1, -1*y2*X2, -1*y2*Y2, -1*y2,
+        X3, Y3, 1,0,0,0,-1*x3*X3,-1*x3*Y3,-1*x3,
+        0, 0, 0, X3, Y3, 1, -1*y3*X3, -1*y3*Y3, -1*y3,
+        X4, Y4, 1,0,0,0,-1*x4*X4,-1*x4*Y4,-1*x4,
+        0, 0, 0, X4, Y4, 1, -1*y4*X4, -1*y4*Y4, -1*y4};
 
     U = Mat(9,9,CV_64F, temp).clone();
     
-    cout << U << endl;
+    // cout << U << endl;
 
 }
 
@@ -128,12 +132,45 @@ void calculateModelMatrix(Mat &modelMatrix, Mat &U)
     eigen(E, eigenValues, eigenVectors);
     // cout << eigenValues.size() << endl;
     // cout << eigenVectors.size() << endl;
+    
+    Point minEigenValuePos;
+    double minValue;
+    minMaxLoc( eigenValues, &minValue, NULL, &minEigenValuePos, NULL );
+    // cout << minEigenValuePos << " " << minValue << endl;
+    // cout << eigenVectors.row(minEigenValuePos.y) << endl;
+    
+    
+    for(int i = 0 ; i < 3 ; i ++)
+    {
+        for(int j = 0 ; j < 3 ; j ++)
+        {
+            // cout << eigenVectors.at<double>(minEigenValuePos.y,i * 3 + j) << endl;
+
+            modelMatrix.at<double>(i,j) = eigenVectors.at<double>(minEigenValuePos.y,i * 3 + j);
+        }
+    }
+    
+    cout << modelMatrix << endl;
 }
+
+double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoint> &sampleKeypoint, vector<KeyPoint> &objectKeypoints)
+{
+    double inlierRatio = 0.0;
+    
+    for(int i = 0 ; i < objectKeypoints.size() ; i ++)
+    {
+        
+    }
+    
+    return inlierRatio;
+}
+
+
 
 void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<KeyPoint> &sampleKeypoints,Mat &sampleDescriptors,vector<Mat_<int>> &matches,Mat *homographyMatrix)
 {
     const double RATIO_THRESHOLD = 0.8;
-    const int MAX_ITERATE_TIME = 10;
+    const int MAX_ITERATE_TIME = 1;        // Test 1 , true value 2000 .
     
     srand ((unsigned)time(NULL));
     
@@ -150,21 +187,28 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
         
         while(inlierRatio < RATIO_THRESHOLD && iterationCount < MAX_ITERATE_TIME)
         {
-            /*
+            
+            
             vector<int> randomPointIndex = getRandomSeed((int)objKeypoints[i].size());
             
-            
+            /*
+            cout << "Rand :" << endl ;
+            cout << randomPointIndex[0] << endl;
+            cout << randomPointIndex[1] << endl;
+            cout << randomPointIndex[2] << endl;
+            cout << randomPointIndex[3] << endl;
+            */
             
             // Index - 0 ~ 3 : points , 4 ~ 7 : related points . e.g (0 -> 4) , (1 -> 5) .. etc .
             vector<Point2f> pointsAndMatchedPoints;
             
             for(int k = 0 ; k < 4 ; k ++)
-            {
-                cout << k << endl;
-                pointsAndMatchedPoints.push_back((objKeypoints[i])[randomPointIndex[i]].pt);
-            }
+                pointsAndMatchedPoints.push_back((objKeypoints[i])[randomPointIndex[k]].pt);
+                
+            
             
      
+            
             for(int j1 = 0 ; j1 < 2 ; j1 ++)
             {
                 for(int j2 = 0 ; j2 < 2 ; j2 ++)
@@ -179,29 +223,41 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
                             pointsAndMatchedPoints.push_back(sampleKeypoints[matches[i].at<int>(randomPointIndex[2],j3)].pt);
                             pointsAndMatchedPoints.push_back(sampleKeypoints[matches[i].at<int>(randomPointIndex[3],j4)].pt);
                             
+                            // cout << sampleKeypoints[matches[i].at<int>(randomPointIndex[0],j1)].pt << endl;
+                            // cout << sampleKeypoints[matches[i].at<int>(randomPointIndex[1],j2)].pt<< endl;
+                            // cout << sampleKeypoints[matches[i].at<int>(randomPointIndex[2],j3)].pt<< endl;
+                            // cout << sampleKeypoints[matches[i].at<int>(randomPointIndex[3],j4)].pt<< endl;
+                            
                             // calculate H Matrix .
                             Mat U = Mat::zeros(9, 9,CV_64FC(1));
-                            // setUMatrix(U,pointsAndMatchedPoints);
-                            // Mat modelMatrix(3,3,CV_64FC(1));
-                            // calculateModelMatrix(modelMatrix,U);
+                            setUMatrix(U,pointsAndMatchedPoints);
+                            Mat modelMatrix(3,3,CV_64FC(1));
+                            calculateModelMatrix(modelMatrix,U);
                             
                             // check inlier ratio .
+                            inlierRatio = calculateInlierRatio(modelMatrix, matches[i], sampleKeypoints, objKeypoints[i]);
+                            
+                            
+                            
+                            // Init ! .
+                            pointsAndMatchedPoints.pop_back();
+                            pointsAndMatchedPoints.pop_back();
+                            pointsAndMatchedPoints.pop_back();
+                            pointsAndMatchedPoints.pop_back();
                         }
 
                     }
 
                 }
             }
-             
+            
      
             
             pointsAndMatchedPoints.clear();
-             
             randomPointIndex.clear();
-             */
             iterationCount ++ ;
             
-            cout << "end" << endl;
+            // cout << "end" << endl;
         }
          
         
@@ -219,7 +275,7 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
     for(int j = 0 ; j < OBJ_NUM ; j ++) // travers all Obj .
     {
         
-        
+        // cout << "Obj " << j << endl;
         // cout << objDescriptors[OBJ_NUM].rows << endl;
         Mat_<int> tempMatch = Mat_<int>(objDescriptors[j].rows,2);
         // cout << objDescriptors[j].size << endl;
@@ -250,6 +306,7 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
                     tempMatch.at<int>(k,0) = i;
                     
                     
+                    
                 }
                 else
                 {
@@ -258,6 +315,7 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
                         min[j][1] = dist;
                         // cout << "Sec Min :" << min[j][1] << endl;
                         tempMatch.at<int>(k,1) = i;
+                        // cout << "Sec min index :" << i << endl;
                         
                     }
                 }
@@ -265,6 +323,7 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
             }
                 
         }
+        // cout << tempMatch << endl;
         matches.push_back(tempMatch);
     }
     
@@ -327,7 +386,7 @@ int main() {
     vector<KeyPoint> sampleKeypoints;
     sift->detect(sampleImg, sampleKeypoints);
     
-    // cout << sampleKeypoints[0].p << endl;
+
     
     // Calculate Descriptor .
     Mat objDescriptors[OBJ_NUM];
