@@ -14,8 +14,9 @@ void readObjectImg(Mat*);
 void readSampleImg(Mat&);
 void getFeaturePoints(Ptr<Feature2D>&,vector<KeyPoint>*,Mat*);
 void calculateFeatureDescriptor(Ptr<Feature2D>&,vector<KeyPoint>*,Mat*,Mat*);
+/* KNN */
 void calculateMatches(Mat*,Mat&,vector<KeyPoint>&,vector<Mat_<int>>&);
-
+/* RANSAC */
 void ransacProcess(vector<KeyPoint>*,Mat*,vector<KeyPoint>&,Mat&,vector<Mat_<int>>&,Mat*);
 vector<int> getRandomSeed(int);
 void setUMatrix(Mat&,vector<Point2f>&);
@@ -87,7 +88,7 @@ vector<int> getRandomSeed(int range)
 
 void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
 {
-    float x1,x2,x3,x4,y1,y2,y3,y4,X1,X2,X3,X4,Y1,Y2,Y3,Y4 ;
+    double x1,x2,x3,x4,y1,y2,y3,y4,X1,X2,X3,X4,Y1,Y2,Y3,Y4 ;
     
     x1 = pointsAndMatchedPoints[0].x;
     x2 = pointsAndMatchedPoints[1].x;
@@ -106,9 +107,15 @@ void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
     Y3 = pointsAndMatchedPoints[6].y;
     Y4 = pointsAndMatchedPoints[7].y;
     
-    // cout << X1 << " " << X2 << " " << X3 << " " << X4 << " " << Y1 << " " << Y2 << " " << Y3 << " " << Y4 << endl;
     
-    float temp[] = {X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
+    /*
+    cout << "Origin " << endl;
+    cout << x1 << " " << x2 << " " << x3 << " " << x4 << " " << y1 << " " << y2 << " " << y3 << " " << y4 << endl;
+    cout << "Matches " << endl;
+    cout << X1 << " " << X2 << " " << X3 << " " << X4 << " " << Y1 << " " << Y2 << " " << Y3 << " " << Y4 << endl;
+    */
+    
+    double temp[] = {X1, Y1, 1,0,0,0,-1*x1*X1,-1*x1*Y1,-1*x1,
         0, 0, 0, X1, Y1, 1, -1*y1*X1, -1*y1*Y1, -1*y1,
         X2, Y2, 1,0,0,0,-1*x2*X2,-1*x2*Y2,-1*x2,
         0, 0, 0, X2, Y2, 1, -1*y2*X2, -1*y2*Y2, -1*y2,
@@ -117,7 +124,7 @@ void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
         X4, Y4, 1,0,0,0,-1*x4*X4,-1*x4*Y4,-1*x4,
         0, 0, 0, X4, Y4, 1, -1*y4*X4, -1*y4*Y4, -1*y4};
 
-    U = Mat(9,9,CV_64F, temp).clone();
+    U = Mat(8,9,CV_64F, temp).clone();
     
     // cout << U << endl;
 
@@ -150,18 +157,36 @@ void calculateModelMatrix(Mat &modelMatrix, Mat &U)
         }
     }
     
-    cout << modelMatrix << endl;
+     // cout << modelMatrix << endl;
 }
 
 double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoint> &sampleKeypoint, vector<KeyPoint> &objectKeypoints)
 {
     double inlierRatio = 0.0;
+    int inlierCount = 0 ;
     
     for(int i = 0 ; i < objectKeypoints.size() ; i ++)
     {
+        Mat objHomoCoordinate = (Mat_<double>(3,1) << objectKeypoints[i].pt.x , objectKeypoints[i].pt.y , 1);
+        Mat mappedToSampleHomoCoordinate = modelMatrix * objHomoCoordinate;
         
+        Point2f mappedToSamplePoint = Point2f(mappedToSampleHomoCoordinate.at<double>(0,0)/mappedToSampleHomoCoordinate.at<double>(0,2),mappedToSampleHomoCoordinate.at<double>(1,0)/mappedToSampleHomoCoordinate.at<double>(0,2));
+        Point2f trueMatchPoint = sampleKeypoint[matches.at<int>(i,0)].pt;
+        
+        cout << "Cal Point : "<< mappedToSamplePoint << endl;
+        cout << "True Point :" << trueMatchPoint << endl;
+        
+        double dist = sqrt(pow(mappedToSamplePoint.x - trueMatchPoint.x, 2.0) + pow(mappedToSamplePoint.y - trueMatchPoint.y, 2.0));
+        
+        cout << "DIs :" << dist << endl;
+        
+        if(dist < 100.0)         // Dist < 100 才稱為inlier .
+            inlierCount ++;
     }
     
+    inlierRatio = (double)inlierCount / objectKeypoints.size();
+    
+    cout << "Inlier Ratio : " << inlierRatio << endl;
     return inlierRatio;
 }
 
