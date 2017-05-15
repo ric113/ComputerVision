@@ -6,6 +6,7 @@
 #include <ctime>
 
 #define OBJ_NUM 7
+#define K 2
 
 using namespace std;
 using namespace cv;
@@ -22,6 +23,8 @@ vector<int> getRandomSeed(int);
 void setUMatrix(Mat&,vector<Point2f>&);
 void calculateModelMatrix(Mat&, Mat&);
 double calculateInlierRatio(Mat&, Mat_<int>&, vector<KeyPoint>&, vector<KeyPoint>&);
+/* Wrapping */
+void wrappingForwardProcess(Mat*,Mat*,Mat&);
 
 
 
@@ -63,6 +66,35 @@ void DEBUG_showFeature(Mat *objImage,vector<KeyPoint>* objKeypoints,Mat sampleIm
     
 }
 
+
+void wrappingForwardProcess(Mat *homographyMatrix,Mat *objImg,Mat &result)
+{
+    
+    for(int i = 0 ; i < OBJ_NUM ; i ++)
+    {
+        for(int r = 0 ; r < objImg[i].rows ; r ++)
+        {
+            for(int c = 0 ; c < objImg[i].cols ; c ++)
+            {
+                Vec3b RGB = objImg[i].at<Vec3b>(r,c);
+                Mat homoOriginPoint = (Mat_<double>(3,1) << c , r, 1);
+                if(RGB[0] != 0 && RGB[1] != 0 && RGB[2] != 0)
+                {
+                    Mat homoWrappedPoint = homographyMatrix[i] * homoOriginPoint;
+                    int wrappedX = (int)(homoWrappedPoint.at<double>(0,0) / homoWrappedPoint.at<double>(2,0));
+                    int wrappedY = (int)(homoWrappedPoint.at<double>(1,0) / homoWrappedPoint.at<double>(2,0));
+                    
+                    // cout << wrappedX << "," << wrappedY << endl;
+                    if(wrappedX > 0 && wrappedY > 0 &&  wrappedX < result.cols && wrappedY < result.rows)
+                        result.at<Vec3b>(wrappedY,wrappedX) = RGB;
+                    
+                }
+            }
+        }
+    }
+    
+}
+
 vector<int> getRandomSeed(int range)
 {
     vector<int> seeds;
@@ -90,22 +122,23 @@ void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
 {
     double x1,x2,x3,x4,y1,y2,y3,y4,X1,X2,X3,X4,Y1,Y2,Y3,Y4 ;
     
-    x1 = pointsAndMatchedPoints[0].x;
-    x2 = pointsAndMatchedPoints[1].x;
-    x3 = pointsAndMatchedPoints[2].x;
-    x4 = pointsAndMatchedPoints[3].x;
-    y1 = pointsAndMatchedPoints[0].y;
-    y2 = pointsAndMatchedPoints[1].y;
-    y3 = pointsAndMatchedPoints[2].y;
-    y4 = pointsAndMatchedPoints[3].y;
-    X1 = pointsAndMatchedPoints[4].x;
-    X2 = pointsAndMatchedPoints[5].x;
-    X3 = pointsAndMatchedPoints[6].x;
-    X4 = pointsAndMatchedPoints[7].x;
-    Y1 = pointsAndMatchedPoints[4].y;
-    Y2 = pointsAndMatchedPoints[5].y;
-    Y3 = pointsAndMatchedPoints[6].y;
-    Y4 = pointsAndMatchedPoints[7].y;
+    X1 = pointsAndMatchedPoints[0].x;
+    X2 = pointsAndMatchedPoints[1].x;
+    X3 = pointsAndMatchedPoints[2].x;
+    X4 = pointsAndMatchedPoints[3].x;
+    Y1 = pointsAndMatchedPoints[0].y;
+    Y2 = pointsAndMatchedPoints[1].y;
+    Y3 = pointsAndMatchedPoints[2].y;
+    Y4 = pointsAndMatchedPoints[3].y;
+    
+    x1 = pointsAndMatchedPoints[4].x;
+    x2 = pointsAndMatchedPoints[5].x;
+    x3 = pointsAndMatchedPoints[6].x;
+    x4 = pointsAndMatchedPoints[7].x;
+    y1 = pointsAndMatchedPoints[4].y;
+    y2 = pointsAndMatchedPoints[5].y;
+    y3 = pointsAndMatchedPoints[6].y;
+    y4 = pointsAndMatchedPoints[7].y;
     
     
     /*
@@ -137,15 +170,10 @@ void calculateModelMatrix(Mat &modelMatrix, Mat &U)
     Mat eigenVectors;
     
     eigen(E, eigenValues, eigenVectors);
+    
     // cout << eigenValues.size() << endl;
     // cout << eigenVectors.size() << endl;
-    
-    Point minEigenValuePos;
-    double minValue;
-    minMaxLoc( eigenValues, &minValue, NULL, &minEigenValuePos, NULL );
-    // cout << minEigenValuePos << " " << minValue << endl;
-    // cout << eigenVectors.row(minEigenValuePos.y) << endl;
-    
+    // cout << E * (eigenVectors.row(8)).t() << endl;
     
     for(int i = 0 ; i < 3 ; i ++)
     {
@@ -153,7 +181,7 @@ void calculateModelMatrix(Mat &modelMatrix, Mat &U)
         {
             // cout << eigenVectors.at<double>(minEigenValuePos.y,i * 3 + j) << endl;
 
-            modelMatrix.at<double>(i,j) = eigenVectors.at<double>(minEigenValuePos.y,i * 3 + j);
+            modelMatrix.at<double>(i,j) = eigenVectors.at<double>(8,i * 3 + j);
         }
     }
     
@@ -170,23 +198,39 @@ double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoin
         Mat objHomoCoordinate = (Mat_<double>(3,1) << objectKeypoints[i].pt.x , objectKeypoints[i].pt.y , 1);
         Mat mappedToSampleHomoCoordinate = modelMatrix * objHomoCoordinate;
         
-        Point2f mappedToSamplePoint = Point2f(mappedToSampleHomoCoordinate.at<double>(0,0)/mappedToSampleHomoCoordinate.at<double>(0,2),mappedToSampleHomoCoordinate.at<double>(1,0)/mappedToSampleHomoCoordinate.at<double>(0,2));
-        Point2f trueMatchPoint = sampleKeypoint[matches.at<int>(i,0)].pt;
+        // cout << mappedToSampleHomoCoordinate << endl;
         
-        cout << "Cal Point : "<< mappedToSamplePoint << endl;
-        cout << "True Point :" << trueMatchPoint << endl;
+        Point2f mappedToSamplePoint = Point2f(mappedToSampleHomoCoordinate.at<double>(0,0)/mappedToSampleHomoCoordinate.at<double>(2,0),mappedToSampleHomoCoordinate.at<double>(1,0)/mappedToSampleHomoCoordinate.at<double>(2,0));
         
-        double dist = sqrt(pow(mappedToSamplePoint.x - trueMatchPoint.x, 2.0) + pow(mappedToSamplePoint.y - trueMatchPoint.y, 2.0));
         
-        cout << "DIs :" << dist << endl;
+       for(int j = 0 ; j < K ; j++)
+        {
+            Point2f trueMatchPoint = sampleKeypoint[matches.at<int>(i,j)].pt;
+            double dist = sqrt(pow(mappedToSamplePoint.x - trueMatchPoint.x, 2.0) + pow(mappedToSamplePoint.y - trueMatchPoint.y, 2.0));
+            
+            // cout << "Cal Point : "<< mappedToSamplePoint << endl;
+            // cout << "True Point :" << trueMatchPoint << endl;
+            
+            // cout << dist << endl;
+            
+            if(dist < 10.0) // Dist < 5 才稱為inlier .
+            {
+                inlierCount ++;
+                break;
+            }
+        }
         
-        if(dist < 100.0)         // Dist < 100 才稱為inlier .
-            inlierCount ++;
+       
+        
+        // cout << "DIs :" << dist << endl;
+        
+       
     }
     
-    inlierRatio = (double)inlierCount / objectKeypoints.size();
+    // cout << inlierCount << "/" << objectKeypoints.size() << endl;
+    inlierRatio = (double)inlierCount / (double)objectKeypoints.size();
     
-    cout << "Inlier Ratio : " << inlierRatio << endl;
+    // cout << "Inlier Ratio : " << inlierRatio << endl;
     return inlierRatio;
 }
 
@@ -195,15 +239,14 @@ double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoin
 void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<KeyPoint> &sampleKeypoints,Mat &sampleDescriptors,vector<Mat_<int>> &matches,Mat *homographyMatrix)
 {
     const double RATIO_THRESHOLD = 0.8;
-    const int MAX_ITERATE_TIME = 1;        // Test 1 , true value 2000 .
+    const int MAX_ITERATE_TIME = 10;        // Test 1 , true value 2000 .
     
     srand ((unsigned)time(NULL));
-    
-    
     
     for(int i = 0 ; i < OBJ_NUM ; i ++)
     {
         double inlierRatio = 0.0;
+        double maxInlierRatio = 0.0;
         int iterationCount = 0 ;
         Mat bestMatrix;
         
@@ -232,15 +275,13 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
                 
             
             
-     
-            
-            for(int j1 = 0 ; j1 < 2 ; j1 ++)
+            for(int j1 = 0 ; j1 < K ; j1 ++)
             {
-                for(int j2 = 0 ; j2 < 2 ; j2 ++)
+                for(int j2 = 0 ; j2 < K ; j2 ++)
                 {
-                    for(int j3 = 0 ; j3 < 2 ; j3 ++)
+                    for(int j3 = 0 ; j3 < K ; j3 ++)
                     {
-                        for(int j4 = 0 ; j4 < 2 ; j4 ++)
+                        for(int j4 = 0 ; j4 < K ; j4 ++)
                         {
                             
                             pointsAndMatchedPoints.push_back(sampleKeypoints[matches[i].at<int>(randomPointIndex[0],j1)].pt);
@@ -254,17 +295,24 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
                             // cout << sampleKeypoints[matches[i].at<int>(randomPointIndex[3],j4)].pt<< endl;
                             
                             // calculate H Matrix .
-                            Mat U = Mat::zeros(9, 9,CV_64FC(1));
+                            Mat U = Mat::zeros(8, 9,CV_64FC(1));
                             setUMatrix(U,pointsAndMatchedPoints);
                             Mat modelMatrix(3,3,CV_64FC(1));
                             calculateModelMatrix(modelMatrix,U);
                             
                             // check inlier ratio .
                             inlierRatio = calculateInlierRatio(modelMatrix, matches[i], sampleKeypoints, objKeypoints[i]);
+                            // cout << inlierRatio << endl;
+                            
+                            // store current best Model .
+                            if(inlierRatio > maxInlierRatio)
+                            {
+                                maxInlierRatio = inlierRatio ;
+                                bestMatrix = modelMatrix;
+                            }
                             
                             
-                            
-                            // Init ! .
+                            // Refresh .
                             pointsAndMatchedPoints.pop_back();
                             pointsAndMatchedPoints.pop_back();
                             pointsAndMatchedPoints.pop_back();
@@ -284,8 +332,8 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
             
             // cout << "end" << endl;
         }
-         
-        
+        cout << maxInlierRatio << endl;
+        homographyMatrix[i] = bestMatrix;
     }
 
     
@@ -302,11 +350,11 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
         
         // cout << "Obj " << j << endl;
         // cout << objDescriptors[OBJ_NUM].rows << endl;
-        Mat_<int> tempMatch = Mat_<int>(objDescriptors[j].rows,2);
+        Mat_<int> tempMatch = Mat_<int>(objDescriptors[j].rows,K);
         // cout << objDescriptors[j].size << endl;
         for(int k = 0 ; k < objDescriptors[j].rows ; k ++) // traverse all keypoints in Obj(j) .
         {
-            float min[OBJ_NUM][2] = {{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX},{FLT_MAX,FLT_MAX}};
+            double min[K] = {DBL_MAX, DBL_MAX};
                 
             for(int i = 0 ; i < sampleKeypoints.size() ; i ++)  // traverse all keypoints in sample .
             {
@@ -316,35 +364,25 @@ void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint
                 
                 
                 Mat_<float> tmp(objDescriptors[j].row(k).size());
-                float dist;
+                double dist;
                 absdiff(sampleDescriptors.row(i),objDescriptors[j].row(k),tmp);
                 dist = norm(tmp,NORM_L2);
                 
                 // cout << dist << endl;
                 
-                
-                if(dist < min[j][0])
+                for(int l = 0 ; l < K ; l ++)
                 {
-                    min[j][0] = dist;
-                    // cout << "First Min :" << min[j][0] << endl;
-                    // cout << sampleKeypoints[i].pt << endl;
-                    tempMatch.at<int>(k,0) = i;
-                    
-                    
-                    
-                }
-                else
-                {
-                    if(dist < min[j][1])
+                    if(dist < min[l])
                     {
-                        min[j][1] = dist;
-                        // cout << "Sec Min :" << min[j][1] << endl;
-                        tempMatch.at<int>(k,1) = i;
-                        // cout << "Sec min index :" << i << endl;
-                        
+                        min[l] = dist;
+                        tempMatch.at<int>(k,l) = i ;
+                        break;
                     }
                 }
                 
+                // cout << "Obj " << j << endl;
+                // cout << "Point : " << k << endl;
+                // cout << min[j][0] << " " <<min[j][1] << endl;
             }
                 
         }
@@ -411,8 +449,6 @@ int main() {
     vector<KeyPoint> sampleKeypoints;
     sift->detect(sampleImg, sampleKeypoints);
     
-
-    
     // Calculate Descriptor .
     Mat objDescriptors[OBJ_NUM];
     calculateFeatureDescriptor(sift, objKeypoints, objImg, objDescriptors);
@@ -421,7 +457,7 @@ int main() {
     
     // DEBUG_showFeature(objImg, objKeypoints, sampleImg, sampleKeypoints);
     
-    // 2 - NN
+    // K - NN
     vector<Mat_<int>> matches;  // store the 'index' of keypoints .
     calculateMatches(objDescriptors, sampleDescriptors, sampleKeypoints, matches);
     
@@ -433,6 +469,47 @@ int main() {
         homographyMatrix[i] = Mat::zeros(3, 3,CV_64FC(1));
     ransacProcess(objKeypoints,objDescriptors,sampleKeypoints,sampleDescriptors,matches,homographyMatrix);
     
+    // Wraping
+    Mat forwardResult(sampleImg.rows,sampleImg.cols,CV_8UC3,Scalar(0,0,0));
+    wrappingForwardProcess(homographyMatrix,objImg,forwardResult);
+    
+    
+    
+    // Stick to Target ----
+    Mat targetImg = imread(PREFIX_PATH + "target.bmp",IMREAD_COLOR);;
+    
+    
+    // Sift
+    vector<KeyPoint> sampleKeypointsArr[1] = {sampleKeypoints};
+    vector<KeyPoint> targetKeypoints;
+    sift->detect(targetImg, targetKeypoints);
+    
+    Mat targetDescriptors;
+    Mat sampleDescriptorsArr[1] = {sampleDescriptors};
+    sift->compute(targetImg, targetKeypoints, targetDescriptors);
+    
+    
+    // K - NN
+    vector<Mat_<int>> targetMatches;
+    calculateMatches(sampleDescriptorsArr, targetDescriptors, targetKeypoints, targetMatches);
+    
+    /*
+    // RANSAC
+    Mat targetHomographyMatrix[1] = {Mat::zeros(3, 3,CV_64FC(1))} ;
+    ransacProcess(sampleKeypointsArr,sampleDescriptorsArr,targetKeypoints,targetDescriptors,targetMatches,targetHomographyMatrix);
+    
+    // Wraping to target .
+    Mat result(targetImg.rows,targetImg.cols,CV_8UC3,Scalar(0,0,0));
+    Mat homographyMatrixToTarget[OBJ_NUM] ;
+    for(int i = 0 ; i < OBJ_NUM ; i ++)
+    {
+        homographyMatrixToTarget[i] = targetHomographyMatrix[1] * homographyMatrix[i];
+    }
+    wrappingForwardProcess(homographyMatrixToTarget,objImg,result);
+    
+    
+    imshow("Result", result);
+    */
     
     // End time
     time_t endTime = time(NULL);
