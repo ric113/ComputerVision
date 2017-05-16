@@ -16,15 +16,20 @@ void readSampleImg(Mat&);
 void getFeaturePoints(Ptr<Feature2D>&,vector<KeyPoint>*,Mat*);
 void calculateFeatureDescriptor(Ptr<Feature2D>&,vector<KeyPoint>*,Mat*,Mat*);
 /* KNN */
-void calculateMatches(Mat*,Mat&,vector<KeyPoint>&,vector<Mat_<int>>&);
+void calculateMatches(Mat*,Mat&,vector<KeyPoint>&,vector<Mat_<int>>&,int);
 /* RANSAC */
-void ransacProcess(vector<KeyPoint>*,Mat*,vector<KeyPoint>&,Mat&,vector<Mat_<int>>&,Mat*);
+void ransacProcess(vector<KeyPoint>*,Mat*,vector<KeyPoint>&,Mat&,vector<Mat_<int>>&,Mat*,int);
 vector<int> getRandomSeed(int);
 void setUMatrix(Mat&,vector<Point2f>&);
 void calculateModelMatrix(Mat&, Mat&);
 double calculateInlierRatio(Mat&, Mat_<int>&, vector<KeyPoint>&, vector<KeyPoint>&);
 /* Wrapping */
-void wrappingForwardProcess(Mat*,Mat*,Mat&);
+void wrappingForwardProcess(Mat*,Mat*,Mat&,int);
+void wrappingBackwardProcess(Mat*,Mat*,Mat&,int);
+
+/* Optimization */
+void gaussianBlur(Mat&);
+void medianFilter(Mat&);
 
 
 
@@ -66,11 +71,89 @@ void DEBUG_showFeature(Mat *objImage,vector<KeyPoint>* objKeypoints,Mat sampleIm
     
 }
 
+void medianFilrer(Mat &img)
+{
+    Mat temp = img ;
+    
+    for(int i = 0 ; i < img.rows ; i ++)
+    {
+        for(int j = 0 ; j < img.cols ; j++)
+        {
+            vector<uchar> tempVec;
+            for(int r = i-1 ; r < i+2 ; r++)
+            {
+                for(int s = j-1 ; s < j+2 ; s++)
+                {
+                    tempVec.push_back(temp.at<uchar>(r,s));
+                }
+            }
+            sort(tempVec.begin(), tempVec.end());
+            img.at<uchar>(i,j) = tempVec.at(4);
+        }
+    }
+}
+void gaussianBlur(Mat &img)
+{
+    Mat temp = img ;
+    
+    for(int i = 0 ; i < temp.rows ; i ++)
+    {
+        for(int j = 0 ; j < temp.cols ; j ++)
+        {
+            Vec3b RGB = temp.at<Vec3b>(i,j);
+            if((RGB[0] == 0 && RGB[1] == 0 && RGB[2] == 0) && (i != 0 && j != 0 && i != temp.rows - 1 && j != temp.cols-1))
+            {
+                int r = 0 , g = 0 , b = 0;
+                for(int x = i - 1 ; x < i + 2 ; x ++)
+                {
+                    for(int y = j - 1 ; y < j + 2 ; y ++)
+                    {
+                        r += (temp.at<Vec3b>(x,y))[0];
+                        g += (temp.at<Vec3b>(x,y))[1];
+                        b += (temp.at<Vec3b>(x,y))[2];
+                    }
+                }
+                RGB = Vec3b(r/9,g/9,b/9);
+            }
+            img.at<Vec3b>(i,j) = RGB;
+        }
+    }
+    
+}
 
-void wrappingForwardProcess(Mat *homographyMatrix,Mat *objImg,Mat &result)
+void wrappingBackwardProcess(Mat *homographyMatrix,Mat *objImg,Mat &result,int size)
+{
+    for(int r = 0 ; r < result.rows ; r ++)
+    {
+        for(int c = 0 ; c < result.cols ; c ++)
+        {
+            for(int i = 0 ; i < size ; i ++)
+            {
+                Mat backwardPoint = (Mat_<double>(3,1) << c , r, 1);
+                Mat homoWrappedPoint = homographyMatrix[i].inv() * backwardPoint;
+                
+                int backwardX = (int)round(homoWrappedPoint.at<double>(0,0) / homoWrappedPoint.at<double>(2,0));
+                int backwardY = (int)round(homoWrappedPoint.at<double>(1,0) / homoWrappedPoint.at<double>(2,0));
+                
+                if(backwardX > 0 && backwardY > 0 &&  backwardX < objImg[i].cols && backwardY < objImg[i].rows)
+                {
+                    Vec3b RGB = objImg[i].at<Vec3b>(backwardY,backwardX);
+                    if(RGB[0] != 0 && RGB[1] != 0 && RGB[2] != 0)
+                    {
+                        result.at<Vec3b>(r,c) = RGB;
+                    }
+                }
+
+                
+            }
+        }
+    }
+}
+
+void wrappingForwardProcess(Mat *homographyMatrix,Mat *objImg,Mat &result,int size)
 {
     
-    for(int i = 0 ; i < OBJ_NUM ; i ++)
+    for(int i = 0 ; i < size ; i ++)
     {
         for(int r = 0 ; r < objImg[i].rows ; r ++)
         {
@@ -81,12 +164,20 @@ void wrappingForwardProcess(Mat *homographyMatrix,Mat *objImg,Mat &result)
                 if(RGB[0] != 0 && RGB[1] != 0 && RGB[2] != 0)
                 {
                     Mat homoWrappedPoint = homographyMatrix[i] * homoOriginPoint;
-                    int wrappedX = (int)(homoWrappedPoint.at<double>(0,0) / homoWrappedPoint.at<double>(2,0));
-                    int wrappedY = (int)(homoWrappedPoint.at<double>(1,0) / homoWrappedPoint.at<double>(2,0));
+                    int wrappedX = (int)round(homoWrappedPoint.at<double>(0,0) / homoWrappedPoint.at<double>(2,0));
+                    int wrappedY = (int)round(homoWrappedPoint.at<double>(1,0) / homoWrappedPoint.at<double>(2,0));
                     
                     // cout << wrappedX << "," << wrappedY << endl;
-                    if(wrappedX > 0 && wrappedY > 0 &&  wrappedX < result.cols && wrappedY < result.rows)
-                        result.at<Vec3b>(wrappedY,wrappedX) = RGB;
+                    if(wrappedX > 1 && wrappedY > 1 &&  wrappedX < result.cols-1 && wrappedY < result.rows-1)
+                    {
+                        for(int x = 0 ; x < 2 ; x ++)
+                        {
+                            for(int y = 0 ; y < 2 ; y ++)
+                            {
+                                result.at<Vec3b>(wrappedY+x,wrappedX+y) = RGB;
+                            }
+                        }
+                    }
                     
                 }
             }
@@ -213,7 +304,7 @@ double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoin
             
             // cout << dist << endl;
             
-            if(dist < 10.0) // Dist < 5 才稱為inlier .
+            if(dist < 5.0) // Dist < 5 才稱為inlier .
             {
                 inlierCount ++;
                 break;
@@ -236,14 +327,14 @@ double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoin
 
 
 
-void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<KeyPoint> &sampleKeypoints,Mat &sampleDescriptors,vector<Mat_<int>> &matches,Mat *homographyMatrix)
+void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<KeyPoint> &sampleKeypoints,Mat &sampleDescriptors,vector<Mat_<int>> &matches,Mat *homographyMatrix,int size)
 {
     const double RATIO_THRESHOLD = 0.8;
-    const int MAX_ITERATE_TIME = 10;        // Test 1 , true value 2000 .
+    const int MAX_ITERATE_TIME = 2000;        // Test 1 , true value 2000 .
     
     srand ((unsigned)time(NULL));
     
-    for(int i = 0 ; i < OBJ_NUM ; i ++)
+    for(int i = 0 ; i < size ; i ++)
     {
         double inlierRatio = 0.0;
         double maxInlierRatio = 0.0;
@@ -332,6 +423,7 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
             
             // cout << "end" << endl;
         }
+        cout << bestMatrix << endl;
         cout << maxInlierRatio << endl;
         homographyMatrix[i] = bestMatrix;
     }
@@ -339,13 +431,13 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
     
 }
 
-void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint> &sampleKeypoints,vector<Mat_<int>> &matches)
+void calculateMatches(Mat *objDescriptors,Mat &sampleDescriptors,vector<KeyPoint> &sampleKeypoints,vector<Mat_<int>> &matches,int size)
 {
     
 
     // cout << sampleKeypoints.size() << endl;
     
-    for(int j = 0 ; j < OBJ_NUM ; j ++) // travers all Obj .
+    for(int j = 0 ; j < size ; j ++) // travers all Obj .
     {
         
         // cout << "Obj " << j << endl;
@@ -459,7 +551,7 @@ int main() {
     
     // K - NN
     vector<Mat_<int>> matches;  // store the 'index' of keypoints .
-    calculateMatches(objDescriptors, sampleDescriptors, sampleKeypoints, matches);
+    calculateMatches(objDescriptors, sampleDescriptors, sampleKeypoints, matches,OBJ_NUM);
     
     // DEBUG_showMatches(matches);
     
@@ -467,49 +559,58 @@ int main() {
     Mat homographyMatrix[OBJ_NUM] ;
     for(int i = 0 ; i < OBJ_NUM ; i ++)
         homographyMatrix[i] = Mat::zeros(3, 3,CV_64FC(1));
-    ransacProcess(objKeypoints,objDescriptors,sampleKeypoints,sampleDescriptors,matches,homographyMatrix);
+    ransacProcess(objKeypoints,objDescriptors,sampleKeypoints,sampleDescriptors,matches,homographyMatrix,OBJ_NUM);
     
     // Wraping
-    Mat forwardResult(sampleImg.rows,sampleImg.cols,CV_8UC3,Scalar(0,0,0));
-    wrappingForwardProcess(homographyMatrix,objImg,forwardResult);
+    // Mat forwardResult(sampleImg.rows,sampleImg.cols,CV_8UC3,Scalar(0,0,0));
+    // wrappingForwardProcess(homographyMatrix, objImg, forwardResult,OBJ_NUM);
+    Mat backwardResult(sampleImg.rows,sampleImg.cols,CV_8UC3,Scalar(0,0,0));
+    // wrappingBackwardProcess(homographyMatrix,objImg,backwardResult,OBJ_NUM);
+    // gaussianBlur(forwardResult);
+    
+    // imshow("Result", backwardResult);
+
     
     
-    
-    // Stick to Target ----
+    // Stick to Target ---- Calculate target to sample H
     Mat targetImg = imread(PREFIX_PATH + "target.bmp",IMREAD_COLOR);;
     
     
     // Sift
-    vector<KeyPoint> sampleKeypointsArr[1] = {sampleKeypoints};
     vector<KeyPoint> targetKeypoints;
     sift->detect(targetImg, targetKeypoints);
+    vector<KeyPoint> targetKeypointsArr[] = {targetKeypoints};
+
     
     Mat targetDescriptors;
-    Mat sampleDescriptorsArr[1] = {sampleDescriptors};
     sift->compute(targetImg, targetKeypoints, targetDescriptors);
-    
+    Mat targetDescriptorsArr[] = {targetDescriptors};
     
     // K - NN
     vector<Mat_<int>> targetMatches;
-    calculateMatches(sampleDescriptorsArr, targetDescriptors, targetKeypoints, targetMatches);
+    calculateMatches(targetDescriptorsArr, sampleDescriptors, sampleKeypoints, targetMatches,1);
     
-    /*
     // RANSAC
-    Mat targetHomographyMatrix[1] = {Mat::zeros(3, 3,CV_64FC(1))} ;
-    ransacProcess(sampleKeypointsArr,sampleDescriptorsArr,targetKeypoints,targetDescriptors,targetMatches,targetHomographyMatrix);
+    Mat targetHomographyMatrix[] = {Mat::zeros(3, 3,CV_64FC(1))} ;
+    // cout << targetHomographyMatrix[0].size() << endl;
+    ransacProcess(targetKeypointsArr,targetDescriptorsArr,sampleKeypoints,sampleDescriptors,targetMatches,targetHomographyMatrix,1);
+    //cout << targetHomographyMatrix[1].size() << endl;
+    // cout << targetHomographyMatrix[0] << endl;
     
     // Wraping to target .
     Mat result(targetImg.rows,targetImg.cols,CV_8UC3,Scalar(0,0,0));
-    Mat homographyMatrixToTarget[OBJ_NUM] ;
+    Mat finalTargetHomographyMatrix[OBJ_NUM];
     for(int i = 0 ; i < OBJ_NUM ; i ++)
     {
-        homographyMatrixToTarget[i] = targetHomographyMatrix[1] * homographyMatrix[i];
+        finalTargetHomographyMatrix[i] = targetHomographyMatrix[0].inv() * homographyMatrix[i];
     }
-    wrappingForwardProcess(homographyMatrixToTarget,objImg,result);
+    wrappingBackwardProcess(finalTargetHomographyMatrix,objImg,result,OBJ_NUM);
+    // wrappingForwardProcess(finalTargetHomographyMatrix,objImg,result,OBJ_NUM);
+    // gaussianBlur(result);
     
     
     imshow("Result", result);
-    */
+    
     
     // End time
     time_t endTime = time(NULL);
