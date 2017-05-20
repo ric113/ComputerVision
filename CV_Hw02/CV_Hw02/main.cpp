@@ -1,4 +1,4 @@
-#include <opencv2/highgui/highgui.hpp> // For VS2015
+#include <opencv2/highgui/highgui.hpp>
 #include <opencv2/xfeatures2d.hpp>
 
 #include <iostream>
@@ -208,6 +208,7 @@ void setUMatrix(Mat &U, vector<Point2f> &pointsAndMatchedPoints)
 {
     double x1,x2,x3,x4,y1,y2,y3,y4,X1,X2,X3,X4,Y1,Y2,Y3,Y4 ;
     
+    // 參考 hw.pdf P.15 .
     X1 = pointsAndMatchedPoints[0].x;
     X2 = pointsAndMatchedPoints[1].x;
     X3 = pointsAndMatchedPoints[2].x;
@@ -285,8 +286,6 @@ double calculateInlierRatio(Mat &modelMatrix, Mat_<int> &matches, vector<KeyPoin
     return inlierRatio;
 }
 
-
-
 void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<KeyPoint> &sampleKeypoints,Mat &sampleDescriptors,vector<Mat_<int>> &matches,Mat *homographyMatrix)
 {
     const double RATIO_THRESHOLD = 0.8;
@@ -360,7 +359,8 @@ void ransacProcess(vector<KeyPoint> *objKeypoints,Mat *objDescriptors,vector<Key
             iterationCount ++ ;
             
         }
-        cout << "Best Matrix : " << bestMatrix << endl;
+        cout << "Best Matrix : " << endl ;
+        cout << bestMatrix << endl;
         cout << "Inlier Ratio : " << maxInlierRatio << endl;
         homographyMatrix[i] = bestMatrix;
     }
@@ -477,8 +477,7 @@ int main() {
         homographyMatrix[i] = Mat::zeros(3, 3,CV_64FC(1));
     ransacProcess(objKeypoints,objDescriptors,sampleKeypoints,sampleDescriptors,matches,homographyMatrix);
     
-   
-    // Wrapping : From puzzle to target .
+   // Wrapping : From puzzle to target .
     Mat finalTargetHomographyMatrix[OBJ_NUM];   // 先Project到sample, 再project到target的Matrix .
     for(int i = 0 ; i < OBJ_NUM ; i ++)
     {
@@ -486,9 +485,10 @@ int main() {
         finalTargetHomographyMatrix[i] = homographyMatrix[OBJ_NUM].inv() * homographyMatrix[i];
     }
     Mat result(objImg[OBJ_NUM].rows,objImg[OBJ_NUM].cols,CV_8UC3,Scalar(0,0,0));
-    wrappingBackwardProcess(finalTargetHomographyMatrix,objImg,result);
-    // wrappingForwardProcess(finalTargetHomographyMatrix,objImg,result,OBJ_NUM);
-    imshow("Result", result);
+    // wrappingBackwardProcess(finalTargetHomographyMatrix,objImg,result);
+    wrappingForwardProcess(finalTargetHomographyMatrix,objImg,result,OBJ_NUM);
+    imwrite("Result_foreward.bmp", result);
+    // imshow("Result", result);
     
     // End time
     time_t endTime = time(NULL);
